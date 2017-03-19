@@ -39,30 +39,42 @@ type (
 
 // createChannel function
 func createChannel(w http.ResponseWriter, r *http.Request) {
+	c := models.Channel{}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-	body, err := ioutil.ReadAll(r.Body)
+	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	c := models.Channel{}
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &c); err != nil {
+	if len(data) > 0 {
+		if err, str := validateChannelSchema(data); err {
 			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, str)
+			return
+		}
+
+		if err := json.Unmarshal(data, &c); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			str := `{"response": "cannot decode body"}`
+			io.WriteString(w, str)
 			return
 		}
 	}
 
-	// TODO: validate model
+	// Creating UUID Version 4
+	c.ID = uuid.NewV4().String()
 
+	// Timestamp
 	ts := time.Now().UTC().Format(time.RFC3339)
 	c.Created, c.Updated = ts, ts
-	c.ID = uuid.NewV4().String()
+
 	c.Owner = ""
 	c.Visibility = "private"
 
+	// Init MongoDB
 	Db := db.MgoDb{}
 	Db.Init()
 	defer Db.Close()
@@ -163,27 +175,39 @@ func updateChannel(w http.ResponseWriter, r *http.Request) {
 	Db.Init()
 	defer Db.Close()
 
-	body, err := ioutil.ReadAll(r.Body)
+	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	c := models.Channel{}
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &c); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
+	// Validate JSON schema
+	if len(data) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		str := `{"response": "no data provided"}`
+		io.WriteString(w, str)
+		return
 	}
 
-	id := bone.GetValue(r, "channel_id")
+	if err, str := validateChannelSchema(data); err {
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, str)
+		return
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(data, &body); err != nil {
+		panic(err)
+	}
+
 	// Timestamp
-	t := time.Now().UTC().Format(time.RFC3339)
-	c.Updated = t
+	body["updated"] = time.Now().UTC().Format(time.RFC3339)
+
+	// Channel id
+	id := bone.GetValue(r, "channel_id")
 
 	colQuerier := bson.M{"id": id}
-	change := bson.M{"$set": c}
+	change := bson.M{"$set": body}
 	if err := Db.C("channels").Update(colQuerier, change); err != nil {
 		log.Print(err)
 		w.WriteHeader(http.StatusNotFound)

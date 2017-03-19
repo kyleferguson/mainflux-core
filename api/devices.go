@@ -10,9 +10,9 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"time"
+	"fmt"
 
 	"github.com/mainflux/mainflux-core/db"
 	"github.com/mainflux/mainflux-core/models"
@@ -25,49 +25,31 @@ import (
 	"net/http"
 
 	"github.com/go-zoo/bone"
+
 )
 
 /** == Functions == */
 
 // createDevice function
 func createDevice(w http.ResponseWriter, r *http.Request) {
+	// Set up defaults and pick up new values from user-provided JSON
+	d := models.Device{}
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		println("HERE")
 		panic(err)
 	}
 
 	if len(data) > 0 {
-		var body map[string]interface{}
-		if err := json.Unmarshal(data, &body); err != nil {
-			panic(err)
-		}
-	}
-
-	/*
-		if validateJsonSchema("device", body) != true {
-			println("Invalid schema")
+		if err, str := validateDeviceSchema(data); err {
 			w.WriteHeader(http.StatusBadRequest)
-			str := `{"response": "invalid json schema in request"}`
 			io.WriteString(w, str)
 			return
 		}
-	*/
 
-	// Init new Mongo session
-	// and get the "devices" collection
-	// from this new session
-	Db := db.MgoDb{}
-	Db.Init()
-	defer Db.Close()
-
-	// Set up defaults and pick up new values from user-provided JSON
-	d := models.Device{Name: "Some Name", Online: false}
-	if len(data) > 0 {
 		if err := json.Unmarshal(data, &d); err != nil {
-			println("Cannot decode!")
 			w.WriteHeader(http.StatusBadRequest)
 			str := `{"response": "cannot decode body"}`
 			io.WriteString(w, str)
@@ -77,13 +59,16 @@ func createDevice(w http.ResponseWriter, r *http.Request) {
 
 	// Creating UUID Version 4
 	uuid := uuid.NewV4()
-	fmt.Println(uuid.String())
-
 	d.ID = uuid.String()
 
 	// Timestamp
 	t := time.Now().UTC().Format(time.RFC3339)
 	d.Created, d.Updated = t, t
+
+	// Init MongoDB
+	Db := db.MgoDb{}
+	Db.Init()
+	defer Db.Close()
 
 	// Insert Device
 	if err := Db.C("devices").Insert(d); err != nil {
@@ -99,9 +84,8 @@ func createDevice(w http.ResponseWriter, r *http.Request) {
 	NatsConn.Publish("core-auth", []byte(msg))
 
 	// Send RSP
+	w.Header().Set("Location", fmt.Sprintf("/devices/%s", d.ID))
 	w.WriteHeader(http.StatusCreated)
-	str := `{"response": "created", "id": "` + d.ID + `"}`
-	io.WriteString(w, str)
 }
 
 // getDevices function
@@ -158,7 +142,6 @@ func updateDevice(w http.ResponseWriter, r *http.Request) {
 
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		println("HERE")
 		panic(err)
 	}
 
@@ -169,46 +152,27 @@ func updateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err, str := validateDeviceSchema(data); err {
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, str)
+		return
+	}
+
 	var body map[string]interface{}
 	if err := json.Unmarshal(data, &body); err != nil {
 		panic(err)
 	}
 
-	/*
-		if validateJsonSchema("device", body) != true {
-			println("Invalid schema")
-			w.WriteHeader(http.StatusBadRequest)
-			str := `{"response": "invalid json schema in request"}`
-			io.WriteString(w, str)
-			return
-		}
-	*/
+	// Timestamp
+	body["updated"] = time.Now().UTC().Format(time.RFC3339)
 
+	// Init MongoDB
 	Db := db.MgoDb{}
 	Db.Init()
 	defer Db.Close()
 
+	// Device id
 	id := bone.GetValue(r, "device_id")
-
-	// Check if someone is trying to change "id" key
-	// and protect us from this
-	if _, ok := body["id"]; ok {
-		w.WriteHeader(http.StatusBadRequest)
-		str := `{"response": "invalid request: device id is read-only"}`
-		io.WriteString(w, str)
-		return
-	}
-	if _, ok := body["created"]; ok {
-		println("Error: can not change device")
-		w.WriteHeader(http.StatusBadRequest)
-		str := `{"response": "invalid request: 'created' is read-only"}`
-		io.WriteString(w, str)
-		return
-	}
-
-	// Timestamp
-	t := time.Now().UTC().Format(time.RFC3339)
-	body["updated"] = t
 
 	colQuerier := bson.M{"id": id}
 	change := bson.M{"$set": body}
