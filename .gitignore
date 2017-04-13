@@ -48,3 +48,6 @@ tags
 
 # Binary
 mainflux-core
+
+# OS X
+.DS_Store

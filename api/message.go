@@ -32,7 +32,7 @@ import (
 // writeMessage function
 // Writtes message into DB.
 // Can be called via various protocols.
-func writeMessage(nm NatsMsg) {
+func writeMessage(nm NatsMsg) error {
 
 	Db := db.MgoDb{}
 	Db.Init()
@@ -41,7 +41,7 @@ func writeMessage(nm NatsMsg) {
 	var s senml.SenML
 	var err error
 	if s, err = senml.Decode(nm.Payload, senml.JSON); err != nil {
-		return
+		return err
 	}
 
 	// Normalize (i.e. resolve) SenMLRecord
@@ -57,11 +57,11 @@ func writeMessage(nm NatsMsg) {
 		b, err := json.Marshal(r)
 		if err != nil {
 			log.Print(err)
-			return
+			return err
 		}
 		if err := json.Unmarshal(b, &m); err != nil {
 			log.Print(err)
-			return
+			return err
 		}
 
 		// Fill-in Mainflux stuff
@@ -73,11 +73,12 @@ func writeMessage(nm NatsMsg) {
 		// Insert message in DB
 		if err := Db.C("messages").Insert(m); err != nil {
 			log.Print(err)
-			return
+			return err
 		}
 	}
 
 	fmt.Println("Msg written")
+	return nil
 }
 
 // sendMessage function
@@ -102,6 +103,14 @@ func sendMessage(w http.ResponseWriter, r *http.Request) {
 
 	cid := bone.GetValue(r, "channel_id")
 
+	// check if channel exist
+	if err = Db.C("channels").Find(bson.M{"id": cid}).One(nil); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		str := `{"response": "not found", "id": "` + cid + `"}`
+		io.WriteString(w, str)
+		return
+	}
+
 	// Publisher ID header
 	hdr := r.Header.Get("Client-ID")
 
@@ -119,7 +128,12 @@ func sendMessage(w http.ResponseWriter, r *http.Request) {
 	NatsConn.Publish("mainflux/core/out", b)
 
 	// Write the message in DB
-	writeMessage(m)
+	if err := writeMessage(m); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		str := `{"response": "` + err.Error() + `"}`
+		io.WriteString(w, str)
+		return
+	}
 
 	// Send back response to HTTP client
 	// We have accepted the request and published it over MQTT,
@@ -138,6 +152,13 @@ func getMessage(w http.ResponseWriter, r *http.Request) {
 	defer Db.Close()
 
 	cid := bone.GetValue(r, "channel_id")
+
+	if err := Db.C("channels").Find(bson.M{"id": cid}).One(nil); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		str := `{"response": "not found", "id": "` + cid + `"}`
+		io.WriteString(w, str)
+		return
+	}
 
 	// Get fileter values from parameters:
 	// - start_time = messages from this moment. UNIX time format.
