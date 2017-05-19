@@ -10,9 +10,9 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
-	"fmt"
 
 	"github.com/mainflux/mainflux-core/db"
 	"github.com/mainflux/mainflux-core/models"
@@ -25,7 +25,6 @@ import (
 	"net/http"
 
 	"github.com/go-zoo/bone"
-
 )
 
 /** == Functions == */
@@ -98,12 +97,6 @@ func getDevices(w http.ResponseWriter, r *http.Request) {
 	if err := Db.C("devices").Find(nil).All(&results); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		str := `{"response": "` + err.Error() + `"}`
-		io.WriteString(w, str)
-		return
-	}
-	if len(results) == 0 {
-		w.WriteHeader(http.StatusNotFound)
-		str := `{"response": "no device found"}`
 		io.WriteString(w, str)
 		return
 	}

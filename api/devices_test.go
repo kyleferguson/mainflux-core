@@ -9,6 +9,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -29,21 +30,21 @@ func TestCreateDevice(t *testing.T) {
 		header string
 		code   int
 	}{
-		{"",                                 "api-key", http.StatusCreated},
-		{`{"name": "test"}`,                 "api-key", http.StatusCreated},
-		{`{"description": "test"}`,          "api-key", http.StatusCreated},
-		{`{"metadata": {"test": "mTest"}}`,  "api-key", http.StatusCreated},
+		{"", "api-key", http.StatusCreated},
+		{`{"name": "test"}`, "api-key", http.StatusCreated},
+		{`{"description": "test"}`, "api-key", http.StatusCreated},
+		{`{"metadata": {"test": "mTest"}}`, "api-key", http.StatusCreated},
 		{`{"name": "test",` +
-		 `"metadata": {"m1": "test",` +
-		 `"m2": "test" }}`,                  "api-key", http.StatusCreated},
+			`"metadata": {"m1": "test",` +
+			`"m2": "test" }}`, "api-key", http.StatusCreated},
 
-		{"invalid",                          "api-key", http.StatusBadRequest},
-		{`{"id": "test"}`,                   "api-key", http.StatusBadRequest},
-		{`{"created": "test"}`,              "api-key", http.StatusBadRequest},
-		{`{"channels": "test"}`,             "api-key", http.StatusBadRequest},
-		{`{"metadata": "string"`,            "api-key", http.StatusBadRequest},
-		{`{"connected_at": "0"`,             "api-key", http.StatusBadRequest},
-		{`{"disconnected_at": "0"`,          "api-key", http.StatusBadRequest},
+		{"invalid", "api-key", http.StatusBadRequest},
+		{`{"id": "test"}`, "api-key", http.StatusBadRequest},
+		{`{"created": "test"}`, "api-key", http.StatusBadRequest},
+		{`{"channels": "test"}`, "api-key", http.StatusBadRequest},
+		{`{"metadata": "string"`, "api-key", http.StatusBadRequest},
+		{`{"connected_at": "0"`, "api-key", http.StatusBadRequest},
+		{`{"disconnected_at": "0"`, "api-key", http.StatusBadRequest},
 		{`{"name": "` + string(n[:]) + `"}`, "api-key", http.StatusBadRequest},
 		{`{"description": "` + string(d[:]) + `"}`, "api-key", http.StatusBadRequest},
 	}
@@ -85,11 +86,12 @@ func TestCreateDevice(t *testing.T) {
 
 func TestGetDevices(t *testing.T) {
 	cases := []struct {
-		header string
-		code   int
+		header      string
+		code        int
+		expectCount int
 	}{
-		{"api-key", http.StatusOK},
-		{"api-key", http.StatusNotFound},
+		{"api-key", http.StatusOK, 2},
+		{"api-key", http.StatusOK, 0},
 	}
 
 	// Init MongoDB (docker_test)
@@ -100,13 +102,14 @@ func TestGetDevices(t *testing.T) {
 	for i, c := range cases {
 		// case 1
 		if i == 0 {
+			Db.C("devices").RemoveAll(nil)
 			// Insert Devices
 			d := models.Device{}
 			d.ID = "testID"
 			Db.C("devices").Insert(d)
 			d.ID = "testID2"
 			Db.C("devices").Insert(d)
-		// case 2
+			// case 2
 		} else {
 			Db.C("devices").RemoveAll(nil)
 		}
@@ -123,9 +126,18 @@ func TestGetDevices(t *testing.T) {
 		if res.StatusCode != c.code {
 			t.Errorf("case %d: expected status %d, got %d", i+1, c.code, res.StatusCode)
 		}
+
+		var deviceList []map[string]interface{}
+		decoder := json.NewDecoder(res.Body)
+		if err = decoder.Decode(&deviceList); err != nil {
+			t.Errorf("case %d: unable to decode JSON body: %v", i+1, err.Error())
+		}
+
+		if len(deviceList) != c.expectCount {
+			t.Errorf("case %d: expected body to contain %d devices, got %d", i+1, c.expectCount, len(deviceList))
+		}
 	}
 }
-
 
 func TestGetDevice(t *testing.T) {
 	cases := []struct {
@@ -133,7 +145,7 @@ func TestGetDevice(t *testing.T) {
 		header string
 		code   int
 	}{
-		{"validID",   "api-key", http.StatusOK},
+		{"validID", "api-key", http.StatusOK},
 		{"invalidID", "api-key", http.StatusNotFound},
 	}
 
@@ -148,7 +160,7 @@ func TestGetDevice(t *testing.T) {
 	Db.C("devices").Insert(d)
 
 	for i, c := range cases {
-		url := fmt.Sprintf("%s/devices/" + c.id, ts.URL)
+		url := fmt.Sprintf("%s/devices/"+c.id, ts.URL)
 		cli := &http.Client{}
 		res, err := cli.Get(url)
 		defer res.Body.Close()
@@ -169,21 +181,21 @@ func TestUpdateDevice(t *testing.T) {
 		header string
 		code   int
 	}{
-		{"",                                 "api-key", http.StatusBadRequest}, // `{"description": "no data provided"}`,
-		{`{"name": "test"}`,                 "api-key", http.StatusOK},
-		{`{"description": "test"}`,          "api-key", http.StatusOK},
-		{`{"metadata": {"test": "mTest"}}`,  "api-key", http.StatusOK},
+		{"", "api-key", http.StatusBadRequest}, // `{"description": "no data provided"}`,
+		{`{"name": "test"}`, "api-key", http.StatusOK},
+		{`{"description": "test"}`, "api-key", http.StatusOK},
+		{`{"metadata": {"test": "mTest"}}`, "api-key", http.StatusOK},
 		{`{"name": "test",` +
-		 `"metadata": {"m1": "test",` +
-		 `"m2": "test" }}`,                  "api-key", http.StatusOK},
+			`"metadata": {"m1": "test",` +
+			`"m2": "test" }}`, "api-key", http.StatusOK},
 
-		{"invalid",                          "api-key", http.StatusBadRequest}, // `{"description": "no data provided"}`,
-		{`{"id": "test"}`,                   "api-key", http.StatusBadRequest},
-		{`{"created": "test"}`,              "api-key", http.StatusBadRequest},
-		{`{"channels": "test"}`,             "api-key", http.StatusBadRequest},
-		{`{"metadata": "string"`,            "api-key", http.StatusBadRequest},
-		{`{"connected_at": "0"`,             "api-key", http.StatusBadRequest},
-		{`{"disconnected_at": "0"`,          "api-key", http.StatusBadRequest},
+		{"invalid", "api-key", http.StatusBadRequest}, // `{"description": "no data provided"}`,
+		{`{"id": "test"}`, "api-key", http.StatusBadRequest},
+		{`{"created": "test"}`, "api-key", http.StatusBadRequest},
+		{`{"channels": "test"}`, "api-key", http.StatusBadRequest},
+		{`{"metadata": "string"`, "api-key", http.StatusBadRequest},
+		{`{"connected_at": "0"`, "api-key", http.StatusBadRequest},
+		{`{"disconnected_at": "0"`, "api-key", http.StatusBadRequest},
 		{`{"name": "` + string(n[:]) + `"}`, "api-key", http.StatusBadRequest},
 		{`{"description": "` + string(d[:]) + `"}`, "api-key", http.StatusBadRequest},
 	}
@@ -223,11 +235,11 @@ func TestUpdateDevice(t *testing.T) {
 
 func TestDeleteDevice(t *testing.T) {
 	cases := []struct {
-		ID   string
+		ID     string
 		header string
 		code   int
 	}{
-		{"invalid",        "api-key", http.StatusNotFound},
+		{"invalid", "api-key", http.StatusNotFound},
 		{"existentTestID", "api-key", http.StatusOK},
 	}
 
